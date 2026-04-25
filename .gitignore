@@ -1,0 +1,6 @@
+flat_script.py
+*.pdf
+.idea
+__pycache__
+test2.py
+Test_ground.py
