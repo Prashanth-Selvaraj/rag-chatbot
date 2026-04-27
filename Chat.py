@@ -10,7 +10,8 @@ from sentence_transformers import CrossEncoder
 SYSTEM_PROMPT = """
     You are a precise AI assistant. Answer the question using ONLY the provided context but dont use phrases like 
     "Based on the Provided context:". Just start with a normal factual response based on the context.
-    If the context does not contain a clear definition, provide a general definition and then relate it to the context. Do not hallucinate."""
+    If the context does not contain a clear definition, provide a general definition and then relate it to the context. Do not hallucinate.
+    """
 
 PDF_PATHS = ["C:/Users/Admin/Desktop/AIML/LLM/RAG_Research_Paper.pdf","C:/Users/Admin/Desktop/AIML/LLM/RAG_NLP_Tasks.pdf"]
 EMBED_MODEL   = "mxbai-embed-large"
@@ -37,7 +38,7 @@ def load_and_chunk_pdf(pdf_path):
         separators = ["\n\n", "\n", ".", " ", ""]
     )
 
-    chunks = splitter.split_text(full_text)   #returns a list of chunks of text from the full_text variable
+    chunks = splitter.split_text(full_text)          #returns a list of chunks of text from the full_text variable
     return chunks
 
 
@@ -78,12 +79,12 @@ def retrieve(index, all_chunks, metadata, user_question, reranker, k=TOP_K):
     query_embeddings = embed_batchwise([user_question])
     faiss.normalize_L2(query_embeddings)
 
-    distances, indices = index.search(query_embeddings, k)
+    distances, indices = index.search(query_embeddings, k)                                # performs Semantic Similarity search between the query and the VB chunks
     retrieved_chunks = [all_chunks[i] for i in indices[0]]
     retrieved_meta = [metadata[i] for i in indices[0]]
 
-    scores = reranker.predict([(user_question, chunk) for chunk in retrieved_chunks])
-    ranked_indices = np.argsort(scores)[::-1]
+    scores = reranker.predict([(user_question, chunk) for chunk in retrieved_chunks])     # Returns a list of raw Logit scores between the query and each retrieved chunk in retrieved_chunks
+    ranked_indices = np.argsort(scores)[::-1]                                             # sorts the list of logit scores in Descending order
 
     ranked_retrieval = [retrieved_chunks[i] for i in ranked_indices]
     ranked_meta = [retrieved_meta[i] for i in ranked_indices]
@@ -133,8 +134,8 @@ def main():
     # index, all_chunks, metadata = build_index(PDF_PATHS)
     convo_history = []  # an empty list for storing convserations
 
-    reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')
-    convo_history.append({"role": "system", "content": SYSTEM_PROMPT})
+    reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')             #creates an instance of CrossEncoder model
+    convo_history.append({"role": "system", "content": SYSTEM_PROMPT})         #append the system role before the loop so that the LLM gets instructed early
 
     while True:
         user_question = input("Ask Anything about LLMs: ")
