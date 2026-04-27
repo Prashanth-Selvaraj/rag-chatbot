@@ -4,6 +4,7 @@ import faiss
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 import argparse
+from sentence_transformers import CrossEncoder
 
                                 ## Creating a Knowledge base ##
 SYSTEM_PROMPT = """
@@ -67,13 +68,13 @@ def build_index(pdf_files):
     chunk_embeddings = embed_batchwise(all_chunks)
 
     dimension = chunk_embeddings.shape[1]
-    faiss.normalize_L2(chunk_embeddings)               # Removes influence of magnitude on embeddings
+    faiss.normalize_L2(chunk_embeddings)               # Removes influence of magnitude on embeddings by bringing the magnitude to the value of 1
     index = faiss.IndexFlatIP(dimension)               # Creates a Vector Database
     index.add(chunk_embeddings)                        # Stores chunk embeddings in my System RAM
     return index, all_chunks, metadata
 
 
-def retrieve(index, all_chunks, metadata, user_question, k = TOP_K):
+def retrieve(index, all_chunks, metadata, user_question, reranker, k=TOP_K):
     query_embeddings = embed_batchwise([user_question])
     faiss.normalize_L2(query_embeddings)
 
@@ -81,16 +82,21 @@ def retrieve(index, all_chunks, metadata, user_question, k = TOP_K):
     retrieved_chunks = [all_chunks[i] for i in indices[0]]
     retrieved_meta = [metadata[i] for i in indices[0]]
 
-    print("\n--Retrieved Chunks--")
-    for j, rt in enumerate(retrieved_chunks):
-        print(f"[{j + 1}] Score: {distances[0][j] : .4f}  |  {rt[:100]}.....")
+    scores = reranker.predict([(user_question, chunk) for chunk in retrieved_chunks])
+    ranked_indices = np.argsort(scores)[::-1]
+
+    ranked_retrieval = [retrieved_chunks[i] for i in ranked_indices]
+    ranked_meta = [retrieved_meta[i] for i in ranked_indices]
+
+    print("\n-----Reranked Chunks------")
+    for j, rt in enumerate(ranked_retrieval):
+        print(f"[{j + 1}] Score: {scores[ranked_indices[j]]:.4f}  |  {rt[:100]}.....")
 
     context = "\n\n---\n".join(
-        [f"From: {retrieved_meta[i]['Source']} (chunk {retrieved_meta[i]['Chunk_ID']}):\n{retrieved_chunks[i]}"
-            for i in range(k)]
-    )
+        [f"From: {ranked_meta[i]['Source']} (chunk {ranked_meta[i]['Chunk_ID']}):\n{ranked_retrieval[i]}"
+         for i in range(k)])
 
-    return retrieved_chunks, retrieved_meta, context
+    return ranked_retrieval, ranked_meta, context
 
 
 def build_prompt(user_question, context):
@@ -107,7 +113,7 @@ def build_prompt(user_question, context):
 
 def main():
     """
-    This Block of code is used so that I can Add more Pdf files for data from the CLI instead
+    This Block of code is used so that I can Add more Pdf files for data from the CLI instead of
     manually updating them in the code
     """
     parser = argparse.ArgumentParser(description='RAG Chatbot')
@@ -127,6 +133,7 @@ def main():
     # index, all_chunks, metadata = build_index(PDF_PATHS)
     convo_history = []  # an empty list for storing convserations
 
+    reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')
     convo_history.append({"role": "system", "content": SYSTEM_PROMPT})
 
     while True:
@@ -137,7 +144,8 @@ def main():
             break
 
         else:
-            retrieved_chunks, retrieved_meta, context = retrieve(index, all_chunks, metadata, user_question)
+            retrieved_chunks, retrieved_meta, context = retrieve(index, all_chunks, metadata, user_question, reranker)
+
             prompt = build_prompt(user_question, context)
 
             convo_history.append({"role": "user", "content": prompt})
