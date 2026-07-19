@@ -4,3 +4,7 @@ flat_script.py
 __pycache__
 test2.py
 Test_ground.py
+*.faiss
+*.pkl
+saved/
+

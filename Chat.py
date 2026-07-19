@@ -5,6 +5,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 import argparse
 from sentence_transformers import CrossEncoder
+import pickle
+import os
 
                                 ## Creating a Knowledge base ##
 SYSTEM_PROMPT = """
@@ -13,7 +15,11 @@ SYSTEM_PROMPT = """
     If the context does not contain a clear definition, provide a general definition and then relate it to the context. Do not hallucinate.
     """
 
-PDF_PATHS = ["C:/Users/Admin/Desktop/AIML/LLM/RAG_Research_Paper.pdf","C:/Users/Admin/Desktop/AIML/LLM/RAG_NLP_Tasks.pdf"]
+#pdf paths for copy/paste "C:/Users/Admin/Desktop/AIML/LLM/RAG_Research_Paper.pdf","C:/Users/Admin/Desktop/AIML/LLM/RAG_NLP_Tasks.pdf"
+
+CHUNKS_PATH = "C:/Users/Admin/Desktop/AIML/LLM/saved/pickle_dump/all_chunks.pkl"
+METADATA_PATH = "C:/Users/Admin/Desktop/AIML/LLM/saved/pickle_dump/metadata.pkl"
+INDEX_PATH = "C:/Users/Admin/Desktop/AIML/LLM/saved/index.faiss"
 EMBED_MODEL   = "mxbai-embed-large"
 CHAT_MODEL    = "gemma3:4b"
 CHUNK_SIZE    = 700
@@ -72,6 +78,16 @@ def build_index(pdf_files):
     faiss.normalize_L2(chunk_embeddings)               # Removes influence of magnitude on embeddings by bringing the magnitude to the value of 1
     index = faiss.IndexFlatIP(dimension)               # Creates a Vector Database
     index.add(chunk_embeddings)                        # Stores chunk embeddings in my System RAM
+
+    #Saving the index in local disk for persistence
+    faiss.write_index(index, INDEX_PATH)
+
+    #Storing the all_chunks and metadata as pickle files
+    with open(CHUNKS_PATH, "wb") as f:
+        pickle.dump(all_chunks, f)
+    with open(METADATA_PATH, "wb") as f:
+        pickle.dump(metadata, f)
+
     return index, all_chunks, metadata
 
 
@@ -84,7 +100,7 @@ def retrieve(index, all_chunks, metadata, user_question, reranker, k=TOP_K):
     retrieved_meta = [metadata[i] for i in indices[0]]
 
     scores = reranker.predict([(user_question, chunk) for chunk in retrieved_chunks])     # Returns a list of raw Logit scores between the query and each retrieved chunk in retrieved_chunks
-    ranked_indices = np.argsort(scores)[::-1]                                             # sorts the list of logit scores in Descending order
+    ranked_indices = np.argsort(scores)[::-1]                                             # sorts the list of indices based on the logit scores in Descending order
 
     ranked_retrieval = [retrieved_chunks[i] for i in ranked_indices]
     ranked_meta = [retrieved_meta[i] for i in ranked_indices]
@@ -128,10 +144,17 @@ def main():
     if args.pdfs:
         index, all_chunks, metadata = build_index(args.pdfs)
     else:
-        print("[INFO] No PDFs provided. Please pass at least one PDF using --pdfs")
-        exit(1)
+        # print("[INFO] No PDFs provided. Please pass at least one PDF using --pdfs")
+        # exit(1)
+        if not os.path.exists(INDEX_PATH):
+            print("[INFO] No saved index found. Please pass at least one PDF using --pdfs")
+            exit(1)
+        index = faiss.read_index(INDEX_PATH)
+        with open(CHUNKS_PATH, "rb") as file:
+            all_chunks = pickle.load(file)
+        with open(METADATA_PATH, "rb") as file:
+            metadata = pickle.load(file)
 
-    # index, all_chunks, metadata = build_index(PDF_PATHS)
     convo_history = []  # an empty list for storing convserations
 
     reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')             #creates an instance of CrossEncoder model
@@ -146,14 +169,13 @@ def main():
 
         else:
             retrieved_chunks, retrieved_meta, context = retrieve(index, all_chunks, metadata, user_question, reranker)
-
             prompt = build_prompt(user_question, context)
 
             convo_history.append({"role": "user", "content": prompt})
 
             # Injecting the Augmented prompt into the model during Runtime
 
-            response = ollama.chat(model=CHAT_MODEL, messages=convo_history)
+            response = ollama.chat(model=CHAT_MODEL, messages=convo_history)           #Here the convo history acts as the augmented prompt being injected into the LLM as input during runtime
             print(response['message']['content'])
 
             convo_history.append({"role": "assistant", "content": response['message']['content']})
