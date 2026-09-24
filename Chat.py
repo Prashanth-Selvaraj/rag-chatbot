@@ -10,10 +10,40 @@ import os
 
                                 ## Creating a Knowledge base ##
 SYSTEM_PROMPT = """
-    You are a precise AI assistant. Answer the question using ONLY the provided context but dont use phrases like 
-    "Based on the Provided context:". Just start with a normal factual response based on the context.
-    If the context does not contain a clear definition, provide a general definition and then relate it to the context. Do not hallucinate.
-    """
+You are an expert AI/ML mentor helping aspiring developers learn machine learning and AI concepts.
+
+YOUR BEHAVIOUR:
+- Use the provided research paper context as your primary source for explanations
+- Supplement with your own knowledge to give complete, beginner friendly explanations
+- When explaining concepts always follow this structure:
+    1. Simple definition
+    2. Intuitive analogy
+    3. Technical explanation
+    4. Real world application
+- Always recommend 2-3 reference links for further reading
+
+RULES FOR PROVIDING LINKS:
+When providing reference links:
+- Only suggest links you are highly confident about
+- Prefer these trusted domains: arxiv.org, huggingface.co, pytorch.org, paperswithcode.com
+- If you are not sure of the exact URL, suggest the domain and tell the user to search for it
+- Never guess or construct URLs — say "search for X on arxiv.org" instead
+- Always mention the paper title and authors alongside any link
+
+STRICT RULE ON LINKS:
+You are PROHIBITED from constructing or generating any URLs directly.
+Instead always say:
+"Search for [paper title] by [authors] on arxiv.org"
+or
+"Find this on huggingface.co by searching [topic]"
+
+The only exception is if the retrieved context contains an exact URL — 
+in that case you may use it verbatim.
+
+- Suggest what the learner should study next after this concept
+- If the context doesn't cover the question, answer from your own knowledge and say so
+- Never hallucinate links — only suggest well known legitimate resources like arxiv.org, huggingface.co, pytorch.org, papers with code
+"""
 
 #pdf paths for copy/paste "C:/Users/Admin/Desktop/AIML/LLM/RAG_Research_Paper.pdf","C:/Users/Admin/Desktop/AIML/LLM/RAG_NLP_Tasks.pdf"
 
@@ -76,16 +106,34 @@ def build_index(pdf_files):
 
     dimension = chunk_embeddings.shape[1]
     faiss.normalize_L2(chunk_embeddings)               # Removes influence of magnitude on embeddings by bringing the magnitude to the value of 1
-    index = faiss.IndexFlatIP(dimension)               # Creates a Vector Database
-    index.add(chunk_embeddings)                        # Stores chunk embeddings in my System RAM
+
+    index_exists = os.path.exists(INDEX_PATH)
+
+    if index_exists:
+        index = faiss.read_index(INDEX_PATH)                  #Loading existing index
+
+        with open(CHUNKS_PATH, "rb") as f:                    #loading all_chunks.pkl
+            existing_chunks = pickle.load(f)
+
+        with open(METADATA_PATH, "rb") as f:                  # loading metadata.pkl
+            existing_metadata = pickle.load(f)
+
+        index.add(chunk_embeddings)
+
+        all_chunks = existing_chunks + all_chunks
+        metadata = existing_metadata + metadata
+
+    else:
+        index = faiss.IndexFlatIP(dimension)               # Creates a Vector Database
+        index.add(chunk_embeddings)                        # Stores chunk embeddings in my System RAM
 
     #Saving the index in local disk for persistence
     faiss.write_index(index, INDEX_PATH)
 
     #Storing the all_chunks and metadata as pickle files
-    with open(CHUNKS_PATH, "wb") as f:
+    with open(CHUNKS_PATH, "wb") as f:                     #converts the all_chunks list into all_chunks.pkl which will contain list of chunks in binary representation
         pickle.dump(all_chunks, f)
-    with open(METADATA_PATH, "wb") as f:
+    with open(METADATA_PATH, "wb") as f:                   #converts the all_chunks list into metadata.pkl which will contain dictionary of metadata in binary representation
         pickle.dump(metadata, f)
 
     return index, all_chunks, metadata
